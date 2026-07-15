@@ -1,0 +1,29 @@
+{
+  "name": "threads-scraper",
+  "version": "1.0.0",
+  "description": "Service untuk scrape mention Threads berdasarkan keyword/akun, dengan proxy rotation & job queue. Penyimpanan pakai file JSON (tanpa database).",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "worker:dev": "tsx watch src/queue/worker.ts",
+    "add-proxy": "tsx src/scripts/add-proxy.ts"
+  },
+  "dependencies": {
+    "bullmq": "^5.12.0",
+    "express": "^4.21.0",
+    "ioredis": "^5.4.1",
+    "playwright": "^1.47.0",
+    "zod": "^3.23.8",
+    "dotenv": "^16.4.5",
+    "pino": "^9.4.0",
+    "pino-http": "^10.3.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.7.4",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}
