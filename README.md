@@ -11,17 +11,17 @@ Service untuk memantau postingan yang mention keyword/akun tertentu di Threads, 
 ## Setup
 
 ```bash
-npm install
-npx playwright install chromium
+pnpm install
+pnpm exec playwright install chromium
 cp .env.example .env   # isi REDIS_URL kalau bukan default
 ```
 
 Tambahkan proxy ke pool (wajib sebelum trigger scraping):
 
 ```bash
-npm run add-proxy -- <host> <port> <username> <password>
+pnpm add-proxy -- <host> <port> <username> <password>
 # contoh:
-npm run add-proxy -- proxy.iproyal.com 12321 myuser mypass
+pnpm add-proxy -- proxy.iproyal.com 12321 myuser mypass
 ```
 
 Bisa dipanggil berkali-kali untuk menambahkan beberapa proxy sekaligus.
@@ -32,10 +32,10 @@ Butuh Redis jalan (untuk job queue), lalu 2 proses terpisah:
 
 ```bash
 # Terminal 1 -- API server
-npm run dev
+pnpm dev
 
 # Terminal 2 -- worker yang benar-benar melakukan scraping
-npm run worker:dev
+pnpm worker:dev
 ```
 
 ## API
@@ -76,6 +76,6 @@ data/
 ## Next steps yang perlu kamu lakukan
 
 1. Inspect halaman search Threads manual, update `selectors.ts` dengan selector asli.
-2. Isi pool proxy pakai `npm run add-proxy` sebelum trigger job pertama.
+2. Isi pool proxy pakai `pnpm add-proxy` sebelum trigger job pertama.
 3. Tambahkan scheduler (mis. BullMQ repeatable job) kalau mau scraping berkala otomatis, bukan cuma manual trigger.
 4. Kalau data makin banyak dan file JSON mulai lambat/berat, migrasi ke database -- tinggal buat implementasi repository baru, usecase & controller tidak perlu diubah.
