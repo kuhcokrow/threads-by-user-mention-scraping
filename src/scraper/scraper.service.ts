@@ -1,7 +1,8 @@
 import { chromium, Browser } from "playwright";
 import { CreateMentionPostInput } from "../domain/mention-post.entity";
 import { ProxyConnectionConfig } from "../domain/proxy-identity.entity";
-import { ThreadsSelectors } from "./selectors";
+import { ThreadsSearch } from "./selectors";
+import { ThreadsPost, ThreadsSearchGraphQLResponse } from "./threads-response.types";
 import { ScrapeBlockedError } from "../shared/errors";
 
 const USER_AGENTS = [
@@ -10,11 +11,6 @@ const USER_AGENTS = [
 ];
 
 export class ScraperService {
-  /**
-   * Scrape halaman search Threads untuk satu keyword, pakai satu proxy identity.
-   * Melempar ScrapeBlockedError kalau terdeteksi captcha/block, supaya
-   * job processor bisa menandai proxy ini gagal dan retry dengan proxy lain.
-   */
   async scrapeMentions(keyword: string, proxy: ProxyConnectionConfig): Promise<CreateMentionPostInput[]> {
     let browser: Browser | null = null;
     try {
@@ -30,54 +26,106 @@ export class ScraperService {
       const context = await browser.newContext({
         userAgent: USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)],
         viewport: { width: 1280, height: 800 },
+        storageState: await this.loadSessionIfExists(),
       });
 
       const page = await context.newPage();
-      await page.goto(ThreadsSelectors.searchUrl(keyword), { waitUntil: "domcontentloaded", timeout: 30_000 });
 
-      // Deteksi block/captcha sebelum lanjut parsing
-      const isBlocked = await page.locator(ThreadsSelectors.captchaIndicator).count();
-      if (isBlocked > 0) {
-        throw new ScrapeBlockedError();
-      }
+      const capturedResponses: ThreadsSearchGraphQLResponse[] = [];
 
-      // Scroll beberapa kali supaya lazy-loaded content ikut termuat
-      for (let i = 0; i < 3; i++) {
-        await page.mouse.wheel(0, 2000);
-        await page.waitForTimeout(1000 + Math.random() * 1000);
-      }
+      page.on("response", async (response) => {
+        const url = response.url();
+        if (!url.includes(ThreadsSearch.graphqlEndpointMatch)) return;
 
-      const containers = await page.locator(ThreadsSelectors.postContainer).all();
-      const results: CreateMentionPostInput[] = [];
-
-      for (const el of containers) {
         try {
-          const authorHandle = (await el.locator(ThreadsSelectors.postAuthorHandle).first().textContent())?.trim();
-          const content = (await el.locator(ThreadsSelectors.postContent).first().textContent())?.trim();
-          const permalink = await el.locator(ThreadsSelectors.postPermalink).first().getAttribute("href");
+          const body = await response.text();
+          if (!body.includes("searchResults")) return;
 
-          if (!authorHandle || !content || !permalink) continue;
-
-          const postId = permalink.split("/post/")[1]?.split(/[/?]/)[0];
-          if (!postId) continue;
-
-          results.push({
-            postId,
-            keyword,
-            authorHandle,
-            content,
-            postUrl: `https://www.threads.net${permalink}`,
-            postedAt: null, // isi kalau selector timestamp sudah dipastikan formatnya
-          });
+          const json = JSON.parse(body) as ThreadsSearchGraphQLResponse;
+          if (json?.data?.searchResults?.edges) {
+            capturedResponses.push(json);
+          }
         } catch {
-          // satu post gagal di-parse tidak boleh menggagalkan seluruh batch
-          continue;
+          // response bukan JSON valid atau bukan shape yang kita harapkan, skip
         }
+      });
+
+      await page.goto(ThreadsSearch.searchUrl(keyword), { waitUntil: "domcontentloaded", timeout: 30_000 });
+
+      // networkidle sering tidak pernah tercapai di Threads (long-polling terus-menerus),
+      // jadi kita tunggu manual dengan jeda lebih panjang + scroll bertahap
+      for (let i = 0; i < 4; i++) {
+        await page.mouse.wheel(0, 2000);
+        await page.waitForTimeout(2000 + Math.random() * 1000);
       }
 
-      return results;
+      if (capturedResponses.length === 0) {
+        // Simpan screenshot & HTML buat debug -- cek apakah kena consent wall,
+        // redirect app-install banner, atau captcha
+        await page.screenshot({ path: `debug-${Date.now()}.png`, fullPage: true }).catch(() => {});
+        const html = await page.content().catch(() => "");
+        console.error("DEBUG page title:", await page.title().catch(() => "?"));
+        console.error("DEBUG page url:", page.url());
+        console.error("DEBUG html length:", html.length);
+        throw new ScrapeBlockedError("Tidak ada response search graphql yang ter-capture");
+      }
+
+      return this.extractMentions(capturedResponses, keyword);
     } finally {
       if (browser) await browser.close();
     }
+  }
+
+  private async loadSessionIfExists(): Promise<string | undefined> {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const sessionPath = path.join(process.cwd(), "data", "session.json");
+    try {
+      await fs.access(sessionPath);
+      return sessionPath;
+    } catch {
+      console.warn("Session belum ada -- scraping jalan tanpa login (anonim). Jalankan `pnpm build-session` dulu.");
+      return undefined;
+    }
+  }
+
+  private extractMentions(responses: ThreadsSearchGraphQLResponse[], keyword: string): CreateMentionPostInput[] {
+    const results: CreateMentionPostInput[] = [];
+    const seenPostIds = new Set<string>();
+    const normalizedKeyword = keyword.replace(/^@/, "").toLowerCase();
+
+    for (const response of responses) {
+      for (const edge of response.data.searchResults.edges) {
+        for (const item of edge.node.thread.thread_items) {
+          const post = item.post;
+          if (seenPostIds.has(post.pk)) continue;
+
+          const fragments = post.text_post_app_info?.text_fragments?.fragments ?? [];
+          const isRealMention = fragments.some(
+            (f) =>
+              f.fragment_type === "mention" &&
+              f.mention_fragment?.mentioned_user.username.toLowerCase() === normalizedKeyword
+          );
+
+          if (!isRealMention) continue;
+
+          seenPostIds.add(post.pk);
+          results.push(this.toMentionInput(post, keyword));
+        }
+      }
+    }
+
+    return results;
+  }
+
+  private toMentionInput(post: ThreadsPost, keyword: string): CreateMentionPostInput {
+    return {
+      postId: post.pk,
+      keyword,
+      authorHandle: post.user.username,
+      content: post.caption?.text ?? "",
+      postUrl: `https://www.threads.com/@${post.user.username}/post/${post.code}`,
+      postedAt: post.taken_at ? new Date(post.taken_at * 1000) : null,
+    };
   }
 }

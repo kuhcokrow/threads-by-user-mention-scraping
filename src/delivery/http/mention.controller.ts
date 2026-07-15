@@ -32,6 +32,20 @@ export class MentionController {
     }
   };
 
+  scrapeNow = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const parsed = triggerScrapeSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new ValidationError(parsed.error.errors[0]?.message);
+      }
+
+      const result = await this.usecase.runScrapeJob(parsed.data.keyword);
+      res.json({ message: "Scraping selesai", ...result });
+    } catch (err) {
+      next(err);
+    }
+  };
+
   /** GET /mentions?keyword=...&page=...&pageSize=... */
   listMentions = async (req: Request, res: Response, next: NextFunction) => {
     try {

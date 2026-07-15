@@ -5,7 +5,7 @@ export interface ScrapeJobData {
   keyword: string;
 }
 
-export const scrapeQueue = new Queue<ScrapeJobData>("scrape-mentions", {
+export const scrapeQueue = new Queue<ScrapeJobData, unknown, "scrape">("scrape-mentions", {
   connection: redisConnection,
   defaultJobOptions: {
     attempts: 3,

@@ -17,3 +17,4 @@ export const mentionRouter = Router();
 
 mentionRouter.post("/mentions/scrape", controller.triggerScrape);
 mentionRouter.get("/mentions", controller.listMentions);
+mentionRouter.post("/mentions/scrape-now", controller.scrapeNow);

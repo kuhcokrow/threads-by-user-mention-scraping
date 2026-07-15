@@ -18,7 +18,7 @@ const proxyPool = new ProxyPoolService(proxyRepo);
 const mentionUsecase = new MentionUsecase(mentionRepo, scraper, proxyPool);
 
 // concurrency rendah sengaja -- tiap job buka browser sendiri, jangan overload host
-const worker = new Worker<ScrapeJobData>(
+const worker = new Worker<ScrapeJobData, unknown, "scrape">(
   "scrape-mentions",
   async (job) => {
     logger.info({ keyword: job.data.keyword, jobId: job.id }, "mulai scrape job");
